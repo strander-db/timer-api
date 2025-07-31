@@ -1,0 +1,5 @@
+services:
+  app:
+    image: strander/timer-api
+    ports:
+      - 7654:7654
