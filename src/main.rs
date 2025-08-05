@@ -9,7 +9,7 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper::{Request, Response};
+use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use rand::Rng;
 use tokio::net::TcpListener;
@@ -46,8 +46,20 @@ async fn handler(
     rng: std::sync::Arc<tokio::sync::Mutex<u64>>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     let result;
-    if request.uri().path().starts_with("/reset/") && request.method() == hyper::Method::POST {
+    if request.method() == hyper::Method::OPTIONS {
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Headers", "*")
+            .header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+            .body(Full::new(Bytes::from("")))
+            .unwrap();
+        result = Ok(response);
+    } else if request.uri().path().starts_with("/reset/") && request.method() == hyper::Method::POST
+    {
         result = reset(request).await;
+    } else if request.uri().path() == "/list" && request.method() == hyper::Method::GET {
+        result = list().await;
     } else if request.method() == hyper::Method::GET {
         result = timestamp(request).await;
     } else {
@@ -63,19 +75,82 @@ async fn handler(
 async fn reset(
     request: Request<hyper::body::Incoming>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
-    let path = request.uri().path();
-    let path = Path::new("./").join(path.trim_start_matches("/reset/"));
+    let name = request.uri().path().trim_start_matches("/reset/");
+    if name == "list" {
+        return Ok(Response::builder()
+            .status(403)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Headers", "*")
+            .header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+            .body(Full::new(Bytes::from("Can't name timer \"list\"")))
+            .unwrap());
+    }
+    let path = Path::new("./").join(name);
     let mut file = File::create(path).unwrap();
     let timestamp = SystemTime::now().duration_since(start_time()).unwrap();
     file.write_all(timestamp.as_secs().to_string().as_bytes())
         .unwrap();
-
+    let mut list = String::new();
+    match File::open(Path::new("./").join("list")) {
+        Ok(mut file) => {
+            file.read_to_string(&mut list).unwrap();
+        }
+        Err(_) => {
+            list = String::from("[]");
+        }
+    };
+    let mut list = list
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .collect::<Vec<&str>>();
+    if !list.contains(&name) {
+        list.push(name);
+    }
+    let list_string = format!(
+        "[{}]",
+        list.iter()
+            .filter(|x| !x.is_empty())
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>()
+            .join(",")
+    );
+    File::create(Path::new("./").join("list"))
+        .unwrap()
+        .write_all(list_string.as_bytes())
+        .unwrap();
     let response = Response::builder()
         .status(200)
+        .header("Content-Type", "application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Access-Control-Allow-Headers", "*")
+        .header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
         .body(Full::new(Bytes::from(format!(
             "{{ \"start\": {}, \"elapsed\": 0 }}",
             timestamp.as_secs()
         ))))
+        .unwrap();
+    Ok(response)
+}
+
+async fn list() -> Result<Response<Full<Bytes>>, Infallible> {
+    let mut list_string = String::new();
+    match File::open(Path::new("./").join("list")) {
+        Ok(mut file) => {
+            file.read_to_string(&mut list_string).unwrap();
+        }
+        Err(_) => {
+            list_string = String::from("[]");
+        }
+    };
+    let response = Response::builder()
+        .status(200)
+        .header("Content-Type", "application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Access-Control-Allow-Headers", "*")
+        .header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+        .body(Full::new(Bytes::from(list_string)))
         .unwrap();
     Ok(response)
 }
@@ -97,6 +172,10 @@ async fn timestamp(
                 - timestamp;
             let response = Response::builder()
                 .status(200)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .header("Access-Control-Allow-Headers", "*")
+                .header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
                 .body(Full::new(Bytes::from(format!(
                     "{{ \"start\": {}, \"elapsed\": {} }}",
                     timestamp, elapsed
@@ -107,6 +186,9 @@ async fn timestamp(
         Err(_) => {
             let response = Response::builder()
                 .status(404)
+                .header("Access-Control-Allow-Origin", "*")
+                .header("Access-Control-Allow-Headers", "*")
+                .header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
                 .body(Full::new(Bytes::from("Not Found")))
                 .unwrap();
             Ok(response)
