@@ -104,6 +104,7 @@ async fn reset(
         .trim_start_matches('[')
         .trim_end_matches(']')
         .split(',')
+        .map(|x| x.trim_matches('"'))
         .collect::<Vec<&str>>();
     if !list.contains(&name) {
         list.push(name);
@@ -112,7 +113,7 @@ async fn reset(
         "[{}]",
         list.iter()
             .filter(|x| !x.is_empty())
-            .map(|x| x.to_string())
+            .map(|x| format!("\"{}\"", x))
             .collect::<Vec<String>>()
             .join(",")
     );
